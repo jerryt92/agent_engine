@@ -3,6 +3,9 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from langchain_openai import ChatOpenAI
+from pydantic import SecretStr
+
 from agents.mysql_assistant.mysql_ops import MySQLConnectionConfig, MySQLOps
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -61,9 +64,13 @@ def build_assistant() -> MySQLAssistant:
     )
     return MySQLAssistant(
         tools=build_tools(),
-        openai_model=openai_model,
-        openai_api_key=openai_api_key,
-        openai_base_url=openai_base_url,
+        llm_chat=ChatOpenAI(
+            model=openai_model,
+            api_key=SecretStr(openai_api_key) if openai_api_key else None,
+            base_url=openai_base_url,
+            temperature=0.3,
+            max_tokens=32768,
+        ),
         print_model_output=print_model_output
     )
 

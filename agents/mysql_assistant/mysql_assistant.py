@@ -1,9 +1,8 @@
 import json
-from typing import Any, Optional
+from typing import Any
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_openai import ChatOpenAI
-from pydantic import SecretStr
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage, ToolCall
 
 import mysql_ops
 
@@ -17,23 +16,15 @@ class MySQLAssistant:
     def __init__(
             self,
             tools: list[Any],
-            openai_model: str,
-            openai_api_key: str,
-            openai_base_url: Optional[str] = None,
+            llm_chat: BaseChatModel,
             print_model_output: bool = False,
     ):
         self.print_model_output = print_model_output
         self.history: list[BaseMessage] = []
         self.system_message = SystemMessage(content=self.build_system_prompt())
         self.tools = tools
-        self.tools_by_name = {tool_.name: tool_ for tool_ in self.tools}
-        self.llm = ChatOpenAI(
-            model=openai_model,
-            api_key=SecretStr(openai_api_key) if openai_api_key else None,
-            base_url=openai_base_url,
-            temperature=0.3,
-            max_tokens=32768,
-        ).bind_tools(self.tools)
+        self.tools_name_dict = {tool_.name: tool_ for tool_ in self.tools}
+        self.llm_chat = llm_chat.bind_tools(self.tools)
 
     def build_system_prompt(self) -> str:
         mode_text = (
@@ -59,32 +50,14 @@ class MySQLAssistant:
             )
         return "\n".join(lines)
 
-    def _invoke_tool_call(self, tool_call: dict[str, Any]) -> ToolMessage:
-        tool_name = tool_call["name"]
-        tool_instance = self.tools_by_name.get(tool_name)
-        if tool_instance is None:
-            content = json.dumps({"error": f"未知工具: {tool_name}"}, ensure_ascii=False)
-            return ToolMessage(content=content, tool_call_id=tool_call["id"])
-
-        try:
-            result = tool_instance.invoke(tool_call.get("args", {}))
-        except Exception as exc:
-            result = json.dumps({"error": str(exc)}, ensure_ascii=False)
-
-        if self.print_model_output:
-            print(f"\n=== 工具调用: {tool_name} ===")
-            print(json.dumps(tool_call.get("args", {}), ensure_ascii=False, indent=2))
-            print("\n=== 工具结果 ===")
-            print(result)
-
-        return ToolMessage(content=str(result), tool_call_id=tool_call["id"])
-
     def ask(self, question: str) -> str:
+        # 当前对话轮次中的消息
         turn_messages: list[BaseMessage] = [HumanMessage(content=question)]
 
         for _ in range(MAX_TOOL_ROUNDS):
             all_content = [self.system_message, *self.history, *turn_messages]
-            response = self.llm.invoke(all_content)
+            # 调用模型Chat接口
+            response = self.llm_chat.invoke(all_content)
             turn_messages.append(response)
 
             if self.print_model_output:
@@ -93,7 +66,7 @@ class MySQLAssistant:
                     print("\n=== 模型输出 ===")
                     print(text)
 
-            tool_calls = response.tool_calls if isinstance(response, AIMessage) else []
+            tool_calls: list[ToolCall] = response.tool_calls if isinstance(response, AIMessage) else []
             if not tool_calls:
                 answer = _message_to_text(response.content)
                 self.history.extend(turn_messages)
@@ -103,6 +76,27 @@ class MySQLAssistant:
                 turn_messages.append(self._invoke_tool_call(tool_call))
 
         raise RuntimeError(f"工具调用轮次超过上限（{MAX_TOOL_ROUNDS}），已中止。")
+        # 处理模型工具调用请求
+
+    def _invoke_tool_call(self, tool_call: ToolCall) -> ToolMessage:
+        tool_name = tool_call["name"]
+        tool_instance = self.tools_name_dict.get(tool_name)
+        if tool_instance is None:
+            content = json.dumps({"error": f"未知工具: {tool_name}"}, ensure_ascii=False)
+            return ToolMessage(content=content, tool_call_id=tool_call["id"])
+
+        try:
+            result: Any = tool_instance.invoke(tool_call.get("args", {}))
+        except Exception as exc:
+            result = json.dumps({"error": str(exc)}, ensure_ascii=False)
+
+        if self.print_model_output:
+            print(f"\n=== 工具调用: {tool_name} ===")
+            print(json.dumps(tool_call.get("args", {}), ensure_ascii=False))
+            print("\n=== 工具结果 ===")
+            print(result)
+
+        return ToolMessage(content=str(result), tool_call_id=tool_call.get("id"))
 
     def reset_history(self) -> None:
         self.history.clear()
