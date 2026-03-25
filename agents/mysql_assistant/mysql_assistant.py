@@ -83,7 +83,8 @@ class MySQLAssistant:
         turn_messages: list[BaseMessage] = [HumanMessage(content=question)]
 
         for _ in range(MAX_TOOL_ROUNDS):
-            response = self.llm.invoke([self.system_message, *self.history, *turn_messages])
+            all_content = [self.system_message, *self.history, *turn_messages]
+            response = self.llm.invoke(all_content)
             turn_messages.append(response)
 
             if self.print_model_output:
