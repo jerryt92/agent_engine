@@ -11,8 +11,8 @@
 
 ## 当前包含的 Agent
 
-- `mysql_assistant`：基于 `ChatOpenAI` 的工具调用式 MySQL 助手
-- `mysql_assistant_re_act`：基于 LangChain `create_agent` + `ChatAnthropic` 的 ReAct 风格 MySQL 助手
+- `mysql_assistant`：基于 `ChatOpenAI`（`lib/langchain_model.py` 预配置）的工具调用式 MySQL 助手
+- `mysql_assistant_re_act`：基于 LangChain `create_agent` + `ChatAnthropic`（`lib/langchain_model.py` 预配置）的 ReAct 风格 MySQL 助手
 
 ## 目录结构
 
@@ -20,7 +20,8 @@
 .
 ├── main.py
 ├── lib/
-│   └── env_loader.py
+│   ├── env_loader.py      # 合并根与 agent 的 .env（进程环境优先）
+│   └── langchain_model.py # 预置 ChatOpenAI / ChatAnthropic（仅从根 .env + 进程环境读模型变量）
 ├── agents/
 │   ├── mysql_assistant/
 │   │   ├── README.md
@@ -55,27 +56,29 @@ pip install -r requirements.txt
 
 ## 环境变量
 
-项目根目录 `.env` 用来放公共模型配置；agent 自己的 `.env` 用来放该 agent 的专属配置。
+项目根目录 `.env` 用来放公共模型配置（供 `lib/langchain_model.py` 在导入时读取）；agent 自己的 `.env` 用来放该 agent 的专属配置（例如 MySQL、运行开关等，由各 agent 在运行时通过 `load_env_config(project_root, agent_dir)` 合并）。
 
 参考示例：
 
 - 根配置：`.env.example`
 - Agent 配置：各 agent 目录下的 `.env.example`
 
-当前根 `.env.example` 里包含两套模型变量：
+当前根 `.env.example` 里包含两套模型变量（可按需填写其一或全部）：
 
 - `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL`
 - `ANTHROPIC_API_KEY`、`ANTHROPIC_BASE_URL`、`ANTHROPIC_API_MODEL`
 
 ## 变量优先级
 
-同名变量的覆盖顺序如下：
+对通过 `load_env_config(project_root, agent_dir)` 合并的配置（例如各 agent 里的 MySQL、运行开关），同名变量覆盖顺序如下：
 
 1. 进程环境变量
 2. agent 目录下的 `.env`
 3. 项目根目录 `.env`
 
 也就是说，agent 的本地配置会覆盖根配置。
+
+**说明**：`lib/langchain_model.py` 在导入时只调用 `load_env_config(project_root)`，模型 API 相关变量以**项目根 `.env` 与进程环境**为准，不受 agent 目录 `.env` 覆盖。
 
 ## 运行方式
 

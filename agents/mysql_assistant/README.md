@@ -1,6 +1,6 @@
 # mysql_assistant
 
-`mysql_assistant` 是一个基于 `ChatOpenAI` 的 MySQL 工具调用式智能体。
+`mysql_assistant` 是一个基于 LangChain `ChatOpenAI` 的 MySQL 工具调用式智能体。对话模型实例来自项目根目录的 `lib/langchain_model.py`（`chat_open_ai`）。
 
 它会在回答问题时按需调用 MySQL 工具，而不是一次性猜 SQL：
 
@@ -10,11 +10,12 @@
 
 ## 核心实现
 
-- `main.py`：启动入口
-- `chat_cli.py`：读取配置、创建模型和 CLI 会话循环
+- `main.py`：启动入口，委托 `chat_cli.main`
+- `chat_cli.py`：合并 agent 与根目录环境变量、装配 `MySQLOps` 与 `MySQLAssistant`、CLI 会话循环；LLM 使用 `lib.langchain_model.chat_open_ai`
 - `mysql_assistant.py`：维护 tool use 循环、上下文历史和系统提示
 - `tools.py`：注册 `list_databases`、`list_tables`、`get_table_schema`、`run_sql`
 - `mysql_ops.py`：负责 MySQL 连接、元数据查询、SQL 安全校验和执行
+- 根目录 `lib/langchain_model.py`：预置 `ChatOpenAI`（导入时从**项目根** `.env` 与进程环境读取 OpenAI 相关变量）
 
 ## 入口
 
@@ -43,19 +44,17 @@ python main.py
 
 ## 环境变量
 
-这个 agent 使用“根 `.env` + agent `.env`”两层配置。
-
-- 项目根目录 `.env`：模型配置
-- `agents/mysql_assistant/.env`：数据库和运行策略配置
+- **OpenAI 对话模型**：由 `lib/langchain_model` 在**导入时**从项目根 `.env` 与进程环境读取；`agents/mysql_assistant/.env` **不会**参与合并模型相关变量。
+- **MySQL 与运行策略**：由 `chat_cli.py` 调用 `load_env_config(项目根, agent 目录)`，合并根目录与 agent 的 `.env`（进程环境优先）。
 
 参考示例：
 
 - 根配置：`.env.example`
 - agent 配置：`agents/mysql_assistant/.env.example`
 
-### 根 `.env`
+### 项目根 `.env`（OpenAI）
 
-常用模型变量：
+常用变量（与 `lib/langchain_model` 中 `ChatOpenAI` 一致）：
 
 - `OPENAI_API_KEY`
 - `OPENAI_BASE_URL`（可选）
@@ -101,9 +100,9 @@ PRINT_MODEL_OUTPUT=false
 - `INCLUDE_TABLES` 支持 `table_name` 和 `db_name.table_name` 两种写法
 - `PRINT_MODEL_OUTPUT=true` 时，会打印模型输出、工具参数和工具结果，方便调试
 
-## 变量优先级
+## 变量优先级（MySQL 与 agent 侧开关）
 
-同名变量的覆盖顺序如下：
+对 `load_env_config(项目根, agents/mysql_assistant)` 合并出的配置，同名变量覆盖顺序为：
 
 1. 进程环境变量
 2. `agents/mysql_assistant/.env`
@@ -131,3 +130,4 @@ PRINT_MODEL_OUTPUT=false
 - 只读模式下会拒绝写操作和危险关键字
 - 如果要放开写操作，需要显式设置 `ALLOW_WRITE=true`
 - 为了减少歧义，执行 SQL 时应尽量显式使用 `db_name.table_name`
+- 依赖包含 `langchain`、`langchain-openai`、`pymysql`、`python-dotenv` 等（见项目根 `requirements.txt`）
